@@ -20,27 +20,32 @@ score_agg = scores.groupby('student_id').agg(
 ).reset_index()
 
 # Merge all into master dataset
-df = (
-    profiles
-    .merge(att_agg, on='student_id', how='left')
-    .merge(score_agg, on='student_id', how='left')
-    .merge(activity, on='student_id', how='left')
-)
+df = profiles.merge(att_agg, on='student_id') \
+             .merge(score_agg, on='student_id') \
+             .merge(activity, on='student_id')
 
-# Clean: fill missing values (numeric only)
+# Clean: fill missing, cap scores at 0-100, fix column names
 df.fillna(df.median(numeric_only=True), inplace=True)
 
-# Clip only specific columns safely
-cols_to_clip = ['avg_exam', 'final_grade']
-df[cols_to_clip] = df[cols_to_clip].clip(lower=0, upper=100)
+# Fix: Clip numeric columns individually (compatible with all pandas versions)
+df['avg_exam'] = df['avg_exam'].clip(lower=0, upper=100)
+df['final_grade'] = df['final_grade'].clip(lower=0, upper=100)
 
-# Standardize column names
 df.columns = df.columns.str.lower().str.replace(' ', '_')
-
-# Remove duplicates
 df.drop_duplicates(subset='student_id', inplace=True)
 
-# Save dataset
-df.to_csv('data/master_dataset.csv', index=False)
+# RISK LABEL CREATION
+def assign_risk(row):
+    score = 0
+    if row['attendance_pct'] < 60: score += 2
+    elif row['attendance_pct'] < 75: score += 1
+    if row['avg_exam'] < 40: score += 2
+    elif row['avg_exam'] < 60: score += 1
+    if row['lms_logins'] < 5: score += 1
+    return 'High' if score >= 3 else 'Medium' if score == 2 else 'Low'
 
-print(f"Master dataset saved: {len(df)} students, {df.shape[1]} features")
+df['risk_level'] = df.apply(assign_risk, axis=1)
+
+df.to_csv('data/master_dataset.csv', index=False)
+print(f'Master dataset saved: {len(df)} students, {df.shape[1]} features')
+print(f'Risk distribution:\n{df["risk_level"].value_counts()}')
